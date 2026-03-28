@@ -1,21 +1,29 @@
-# LinkedIn Post — Validation Maps
+# LinkedIn Post — Validation Set Live Geographic Maps
+
 ---
 
-🔬 **Validating Spatial AI: When RMSE Scores Hide Geological Bias** 🗺️
+📍 **RMSE Doesn't Show You Where Your Model Fails. A Map Does.**
 
-If you're trusting basic R² or RMSE scores to validate your spatial machine learning models, you could be accidentally deploying a heavily biased algorithm. 
+Here's a scenario that plays out more often than it should in spatial machine learning:
 
-To strictly evaluate my heavy metal models against the **Swiss Jura geographic dataset**, I pulled 100 samples into an isolated Validation set. But I realized numerical testing alone wouldn’t scream *"Your model fails miserably purely over Portlandian Rock!"*
+Your Kriging or Random Forest model returns a respectable R² of 0.72 on the validation set. You ship it. Later, an expert flags that predictions are systematically wrong in the northern part of the study area.
 
-To truly test for "Spatial Leakage" and topographical clustering, I generated a strict **Validation Geographic Maps Dashboard** utilizing Live OpenStreetMap Layers (Leaflet.js).
+The aggregate score looked fine. The map would have screamed it.
 
-But laying it over topography wasn't enough; I built a **Live Environmental Switchboard** directly into the UI.
+For my **Swiss Jura geochemical field study validation**, I built a dedicated **geographic audit dashboard** — projecting the strict 100-sample hold-out set onto live **OpenStreetMap topography** using Leaflet.js. Seven maps. One per heavy metal. Real terrain. Real coordinates.
 
-🚩 **Categoric Testing**: With one click, I can uncheck all environmental land uses except 'Forests'. The maps recalculate instantly, visually stripping away everything else. It allows manual, blazing-fast visual auditing. If my autonomous agent predicted a 150ppm Chromium spike here, does the map reflect that localized spike over that Forest?
-🔍 **Sparsity Mapping**: Overlaid dynamically onto true Topography (WGS84), it visually guarantees your 100 holdout locations aren't clustered artificially on a single highway.
+The workflow I now use:
 
-Your validation test sets deserve more than just a passing aggregate metric. They deserve total environmental cartography! 
+**Step 1 — Spatial distribution check.** Does the +500 m boundary polygon (convex hull of all 359 combined samples) contain the validation points proportionally, or are they clustered in a corner? With the toggle active, this is visible in seconds.
 
-What tools do you use manually to audit regional failures in your machine learning workflows? Let's chat! 👇
+**Step 2 — Geological unit audit.** Using the **Live Filter Panel**, I isolate one rock formation at a time — ordered youngest → oldest (Quaternary · Portlandian · Kimmeridgian · Sequanian · Argovian). If a model is underperforming over Sequanian limestone specifically, those 12 red validation dots will stand out against black basemap in isolation.
 
-#MachineLearning #GeoAI #DataLeakage #DataScience #SpatialAnalysis #LeafletJS #AI #EnvironmentalScience #ModelEvaluation
+**Step 3 — Land use cross-reference.** Uncheck all Land Use categories except "Tillage" — agricultural soils show different contamination mechanics than forested hillslopes. A model that excels in forests but fails in tilled fields will be invisible in an aggregate RMSE but obvious on a filtered map.
+
+**The result:** I identified that the highest Chromium validation samples are almost exclusively located over Argovian formations in the western section of the study area — a geographic concentration the model will need to account for.
+
+No backend. No GIS server. Pure Leaflet.js, one HTML file, loaded offline.
+
+Are you spatially validating your models, or just statistically validating them? 👇
+
+#SpatialAI #ModelValidation #GeoAI #MachineLearning #Geochemistry #DataScience #Leaflet #OpenStreetMap #SpatialAnalysis

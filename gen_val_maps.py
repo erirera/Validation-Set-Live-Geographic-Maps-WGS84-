@@ -1,33 +1,99 @@
 import csv, json, math, os
 from string import Template
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-csv_path = os.path.join(BASE, "jura_validation_set.csv")
+BASE    = os.path.dirname(os.path.abspath(__file__))
+csv_val  = os.path.join(BASE, "../validation set EDA/jura_validation_set.csv")
+csv_pred = os.path.join(BASE, "../../Prediction set/prediction set EDA/jura_prediction_set.csv")
 
 METALS = ["Cd","Cu","Pb","Co","Cr","Ni","Zn"]
 COLORS = ["#f72585","#7209b7","#3a0ca3","#4361ee","#4cc9f0","#06d6a0","#ffd166"]
 
+# ── Convex hull helpers (no external dependencies) ────────────────────────────
+def _cross(O, A, B):
+    return (A[0]-O[0])*(B[1]-O[1]) - (A[1]-O[1])*(B[0]-O[0])
+
+def convex_hull(points):
+    pts = sorted(set(points))
+    if len(pts) <= 1:
+        return pts
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+def offset_hull(hull, offset_km):
+    cx = sum(p[0] for p in hull) / len(hull)
+    cy = sum(p[1] for p in hull) / len(hull)
+    result = []
+    for (x, y) in hull:
+        dx, dy = x - cx, y - cy
+        dist   = math.sqrt(dx*dx + dy*dy) or 1e-9
+        result.append((x + dx/dist * offset_km, y + dy/dist * offset_km))
+    return result
+
+# ── Load ALL points (both datasets) for the combined boundary ─────────────────
+def load_xy(path):
+    pts = []
+    def clean(v): return float(v.replace(',','.').replace('/.','.').replace('..','.'))
+    try:
+        with open(path, newline="") as f:
+            reader = csv.reader(f)
+            next(reader)
+            for line in reader:
+                if len(line) < 3 or line[0].strip() == "":
+                    continue
+                try:
+                    pts.append((clean(line[1]), clean(line[2])))
+                except:
+                    pass
+    except FileNotFoundError:
+        pass
+    return pts
+
+all_xy    = load_xy(csv_val) + load_xy(csv_pred)
+hull_km   = convex_hull(all_xy)
+hull_off  = offset_hull(hull_km, offset_km=0.5)
+
+# ── Convert hull km → WGS84 ───────────────────────────────────────────────────
+LAT0, LON0 = 47.15, 6.85
+def km_to_wgs84(x, y):
+    lat = LAT0 + y / 111.32
+    lon = LON0 + x / (111.32 * math.cos(math.radians(LAT0)))
+    return [lat, lon]
+
+boundary_wgs84 = [km_to_wgs84(x, y) for x, y in hull_off]
+
+# ── Load validation rows ──────────────────────────────────────────────────────
 rows = []
-with open(csv_path, newline="") as f:
+def clean(v): return float(v.replace(',','.').replace('/.','.').replace('..','.'))
+with open(csv_val, newline="") as f:
     reader = csv.reader(f)
     next(reader)
     for line in reader:
         if len(line) < 12 or line[0].strip() == "":
             continue
         try:
-            def clean(val): return float(val.replace(',', '.').replace('/.', '.').replace('..', '.'))
             rows.append({
-                "id": int(clean(line[0])), "x": clean(line[1]), "y": clean(line[2]),
+                "id":   int(clean(line[0])),
+                "x":    clean(line[1]),  "y":  clean(line[2]),
                 "rock": int(clean(line[3])), "land": int(clean(line[4])),
-                "Cd": clean(line[5]), "Cu": clean(line[6]), "Pb": clean(line[7]),
-                "Co": clean(line[8]), "Cr": clean(line[9]),
-                "Ni": clean(line[10]), "Zn": clean(line[11]),
+                "Cd":   clean(line[5]),  "Cu": clean(line[6]),
+                "Pb":   clean(line[7]),  "Co": clean(line[8]),
+                "Cr":   clean(line[9]),  "Ni": clean(line[10]),
+                "Zn":   clean(line[11]),
             })
-        except Exception as e:
+        except:
             pass
 
 n = len(rows)
 
+# ── Template ──────────────────────────────────────────────────────────────────
 TMPL = Template("""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -47,26 +113,25 @@ header{background:linear-gradient(135deg,#1a1a3e 0%,#0d0d2b 100%);padding:28px 4
 .nav-group{display:flex;gap:12px;margin-left:auto;align-items:center}
 .badge{background:rgba(76,201,240,.15);border:1px solid #4cc9f0;color:#4cc9f0;border-radius:20px;padding:4px 14px;font-size:.78rem;font-weight:600}
 .nav-btn{background:rgba(76,201,240,.1);border:1px solid #4cc9f0;color:#4cc9f0;border-radius:8px;padding:6px 14px;font-size:.85rem;font-weight:600;text-decoration:none;transition:all 0.2s}
-.nav-btn.primary{background:#4cc9f0;color:#0d0d2b;border-color:#4cc9f0}
 .nav-btn:hover{background:rgba(76,201,240,.25)}
-.nav-btn.primary:hover{opacity:0.8}
 main{padding:32px 40px;max-width:1800px;margin:0 auto}
-
-/* Filter Panel CSS */
-.filter-panel { background:#13132b; border:1px solid #2a2a5a; border-radius:14px; padding:20px 24px; margin-bottom:24px; display:flex; gap:36px; flex-wrap:wrap; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-.filter-group { display:flex; gap:16px; align-items:center; flex-wrap:wrap;}
-.filter-group strong { color:#4cc9f0; font-size:.85rem; text-transform:uppercase; letter-spacing:1px; margin-right:4px; }
-.filter-group label { color:#a0a0cc; font-size:.85rem; display:flex; gap:6px; align-items:center; cursor:pointer; transition:color 0.2s; }
-.filter-group label:hover { color:#e0e0ff; }
-.filter-group input { cursor:pointer; accent-color:#f72585; width:16px; height:16px; }
-
+.filter-panel{background:#13132b;border:1px solid #2a2a5a;border-radius:14px;padding:20px 24px;margin-bottom:24px;display:flex;gap:36px;flex-wrap:wrap;box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+.filter-group{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.filter-group strong{color:#4cc9f0;font-size:.85rem;text-transform:uppercase;letter-spacing:1px;margin-right:4px}
+.filter-group label{color:#a0a0cc;font-size:.85rem;display:flex;gap:6px;align-items:center;cursor:pointer;transition:color 0.2s}
+.filter-group label:hover{color:#e0e0ff}
+.filter-group input{cursor:pointer;accent-color:#f72585;width:16px;height:16px}
+.age-tag{font-size:.7rem;color:#555588;font-style:italic;margin-left:2px}
+.filter-divider{width:1px;background:#2a2a5a;align-self:stretch;margin:0 8px}
+.boundary-label{color:#ffd166!important}
+.boundary-label input{accent-color:#ffd166!important}
 .grid-maps{display:flex;flex-wrap:wrap;gap:24px;justify-content:center}
-.card{background:#13132b; border:1px solid #2a2a5a; border-radius:14px; padding:24px; width:calc(50% - 12px); min-width:400px; flex-grow:1}
+.card{background:#13132b;border:1px solid #2a2a5a;border-radius:14px;padding:24px;width:calc(50% - 12px);min-width:400px;flex-grow:1}
 .card-title{font-size:1rem;font-weight:600;color:#8888cc;margin-bottom:16px;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between}
 .metal-range{font-size:0.75rem;font-weight:400;color:#e0e0ff;background:#2a2a5a;padding:4px 8px;border-radius:6px}
-.leaflet-container {height: 400px; border-radius: 8px; z-index: 1;}
-.leaflet-popup-content-wrapper {background:#1a1a3e; color:#e0e0ff; border:1px solid #3a3a6a; border-radius:6px; box-shadow: 0 4px 10px rgba(0,0,0,0.5);}
-.leaflet-popup-tip {background:#1a1a3e;}
+.leaflet-container{height:400px;border-radius:8px;z-index:1}
+.leaflet-popup-content-wrapper{background:#1a1a3e;color:#e0e0ff;border:1px solid #3a3a6a;border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,0.5)}
+.leaflet-popup-tip{background:#1a1a3e}
 footer{text-align:center;padding:24px;color:#444466;font-size:.78rem;border-top:1px solid #1a1a3a}
 </style>
 </head>
@@ -79,21 +144,21 @@ footer{text-align:center;padding:24px;color:#444466;font-size:.78rem;border-top:
   </div>
   <div class="nav-group">
     <div class="badge">n = $n_samples samples</div>
-    <a href="index2.html" class="nav-btn">&larr; Back to EDA</a>
-    <a href="../Prediction set/prediction_maps.html" class="nav-btn">&larr; Prediction Maps</a>
+    <a href="../validation set EDA/index.html" class="nav-btn">&larr; Back to EDA</a>
+    <a href="../../Prediction set/prediction set map/index.html" class="nav-btn">&larr; Prediction Maps</a>
   </div>
 </header>
 <main>
-  
   <div class="filter-panel">
     <div class="filter-group">
-      <strong>Rock Type:</strong>
-      <label><input type="checkbox" class="filter-cb" data-type="rock" value="1" checked> Argovian</label>
-      <label><input type="checkbox" class="filter-cb" data-type="rock" value="2" checked> Kimmeridgian</label>
-      <label><input type="checkbox" class="filter-cb" data-type="rock" value="3" checked> Sequanian</label>
-      <label><input type="checkbox" class="filter-cb" data-type="rock" value="4" checked> Portlandian</label>
-      <label><input type="checkbox" class="filter-cb" data-type="rock" value="5" checked> Quaternary</label>
+      <strong>Rock Type <span style="font-weight:400;color:#6666aa;font-size:.75rem;">(youngest &rarr; oldest)</span>:</strong>
+      <label title="Pleistocene-Holocene, ~2.58 Ma-present"><input type="checkbox" class="filter-cb" data-type="rock" value="5" checked> Quaternary <span class="age-tag">~2.58 Ma</span></label>
+      <label title="Tithonian, Late Jurassic, ~152-145 Ma"><input type="checkbox" class="filter-cb" data-type="rock" value="4" checked> Portlandian <span class="age-tag">~152 Ma</span></label>
+      <label title="Kimmeridgian, Late Jurassic, ~157-152 Ma"><input type="checkbox" class="filter-cb" data-type="rock" value="2" checked> Kimmeridgian <span class="age-tag">~157 Ma</span></label>
+      <label title="Upper Oxfordian, Late Jurassic, ~163-157 Ma"><input type="checkbox" class="filter-cb" data-type="rock" value="3" checked> Sequanian <span class="age-tag">~163 Ma</span></label>
+      <label title="Callovian-lower Oxfordian, Mid Jurassic, ~166-163 Ma"><input type="checkbox" class="filter-cb" data-type="rock" value="1" checked> Argovian <span class="age-tag">~166 Ma</span></label>
     </div>
+    <div class="filter-divider"></div>
     <div class="filter-group">
       <strong>Land Use:</strong>
       <label><input type="checkbox" class="filter-cb" data-type="land" value="1" checked> Forest</label>
@@ -101,122 +166,123 @@ footer{text-align:center;padding:24px;color:#444466;font-size:.78rem;border-top:
       <label><input type="checkbox" class="filter-cb" data-type="land" value="3" checked> Meadow</label>
       <label><input type="checkbox" class="filter-cb" data-type="land" value="4" checked> Tillage</label>
     </div>
+    <div class="filter-divider"></div>
+    <div class="filter-group">
+      <strong>Boundary:</strong>
+      <label class="boundary-label">
+        <input type="checkbox" id="boundaryToggle" checked> Study Area (+500 m offset)
+      </label>
+    </div>
   </div>
-
   <div class="grid-maps" id="mapsGrid"></div>
 </main>
 <footer>Jura Spatial Maps &middot; Swiss Jura Heavy Metals Dataset &middot; Validation Set (n=$n_samples)</footer>
 <script>
-var ROWS = $rows_js;
-var METALS = $metals_js;
+var ROWS     = $rows_js;
+var METALS   = $metals_js;
+var BOUNDARY = $boundary_js;
 
-// Utility functions
 function lerp(a,b,t){return a+(b-a)*t;}
 function metalColor(val,mn,mx){
   var t=Math.max(0,Math.min(1,(val-mn)/(mx-mn)));
   var r=Math.round(lerp(14,247,t)),g=Math.round(lerp(165,37,t)),b=Math.round(lerp(233,133,t));
   return 'rgb('+r+','+g+','+b+')';
 }
-
-// Convert Local grid (km) to approximate Lat/Lon (WGS84)
-function projectWGS84(x_km, y_km) {
-  var lat_origin = 47.15;
-  var lon_origin = 6.85;
-  var lat = lat_origin + (y_km * (1 / 111.32));
-  var lon = lon_origin + (x_km * (1 / (111.32 * Math.cos(lat_origin * Math.PI / 180))));
-  return [lat, lon];
+function projectWGS84(x_km,y_km){
+  var lat=47.15+(y_km/111.32);
+  var lon=6.85+(x_km/(111.32*Math.cos(47.15*Math.PI/180)));
+  return [lat,lon];
 }
 
-var grid = document.getElementById('mapsGrid');
-var ALL_MARKERS = []; // Store references for filtering
+var grid=document.getElementById('mapsGrid');
+var ALL_MARKERS=[];
+var ALL_POLYGONS=[];
 
 METALS.forEach(function(m){
-  var vals = ROWS.map(function(r){return r[m];});
-  var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
-  
-  var card = document.createElement('div');
-  card.className = 'card';
-  card.innerHTML = '<div class="card-title">' + m + ' (ppm) <span class="metal-range">Range: ' + mn.toFixed(2) + ' &rarr; ' + mx.toFixed(2) + '</span></div><div id="map_' + m + '"></div>';
+  var vals=ROWS.map(function(r){return r[m];});
+  var mn=Math.min.apply(null,vals), mx=Math.max.apply(null,vals);
+
+  var card=document.createElement('div');
+  card.className='card';
+  card.innerHTML='<div class="card-title">'+m+' (ppm) <span class="metal-range">Range: '+mn.toFixed(2)+' &rarr; '+mx.toFixed(2)+'</span></div><div id="map_'+m+'"></div>';
   grid.appendChild(card);
-  
-  var map = L.map('map_' + m);
-  
-  // Custom Dark Mode Map Tiles via CartoDB
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 18
+
+  var map=L.map('map_'+m);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    maxZoom:18
   }).addTo(map);
 
-  var latLngs = [];
-  
-  ROWS.forEach(function(r) {
-      var ll = projectWGS84(r.x, r.y);
-      latLngs.push(ll);
-      
-      var color = metalColor(r[m], mn, mx);
-      
-      var circle = L.circleMarker(ll, {
-          radius: 6,
-          fillColor: color,
-          color: '#ffffff',
-          weight: 1.2,
-          opacity: 0.9,
-          fillOpacity: 0.85
-      }).addTo(map);
-      
-      var rStr = ['Argovian','Kimmeridgian','Sequanian','Portlandian','Quaternary'][r.rock-1];
-      var lStr = ['Forest','Pasture','Meadow','Tillage'][r.land-1];
+  // Study area boundary polygon
+  var poly=L.polygon(BOUNDARY,{
+    color:'#ffd166',
+    weight:2,
+    opacity:0.9,
+    fillColor:'#ffd166',
+    fillOpacity:0.05,
+    dashArray:'8 5'
+  }).addTo(map);
+  poly.bindTooltip('Combined Study Area (+500 m offset)',{sticky:true,className:'boundary-tooltip'});
+  ALL_POLYGONS.push(poly);
 
-      var popupContent = '<b>Validation ID: ' + r.id + '</b><hr style="border:0;border-top:1px solid #3a3a6a;margin:6px 0;">' + 
-                         m + ' Conc: <b style="color:#4cc9f0">' + r[m] + ' ppm</b><br>' + 
-                         'Rock Type: <b>' + rStr + '</b><br>' + 
-                         'Land Use: <b>' + lStr + '</b><br>' + 
-                         '<span style="color:#888;font-size:0.8em;display:block;margin-top:4px;">Grid: (' + r.x + 'km, ' + r.y + 'km)</span>';
-      circle.bindPopup(popupContent);
-      
-      // Optional tooltip for fast hovering
-      circle.bindTooltip(r[m].toString(), {direction:'top', className:'map-tooltip'});
-
-      ALL_MARKERS.push({marker: circle, rock: r.rock, land: r.land});
+  var latLngs=[];
+  ROWS.forEach(function(r){
+    var ll=projectWGS84(r.x,r.y);
+    latLngs.push(ll);
+    var color=metalColor(r[m],mn,mx);
+    var circle=L.circleMarker(ll,{
+      radius:6,fillColor:color,color:'#ffffff',
+      weight:1.2,opacity:0.9,fillOpacity:0.85
+    }).addTo(map);
+    var rStr=['Argovian','Kimmeridgian','Sequanian','Portlandian','Quaternary'][r.rock-1];
+    var lStr=['Forest','Pasture','Meadow','Tillage'][r.land-1];
+    circle.bindPopup(
+      '<b>Validation ID: '+r.id+'</b><hr style="border:0;border-top:1px solid #3a3a6a;margin:6px 0;">'+
+      m+' Conc: <b style="color:#4cc9f0">'+r[m]+' ppm</b><br>'+
+      'Rock Type: <b>'+rStr+'</b><br>Land Use: <b>'+lStr+'</b><br>'+
+      '<span style="color:#888;font-size:0.8em;display:block;margin-top:4px;">Grid: ('+r.x+'km, '+r.y+'km)</span>'
+    );
+    circle.bindTooltip(r[m].toString(),{direction:'top',className:'map-tooltip'});
+    ALL_MARKERS.push({marker:circle,rock:r.rock,land:r.land});
   });
-
-  // Fit view bounds to data natively
-  map.fitBounds(L.latLngBounds(latLngs), {padding: [15, 15]});
+  map.fitBounds(L.latLngBounds(latLngs),{padding:[15,15]});
 });
 
-// Live Filtering Engine
-function applyFilters() {
-    var checkedRocks = Array.from(document.querySelectorAll('.filter-cb[data-type="rock"]:checked')).map(cb => parseInt(cb.value));
-    var checkedLands = Array.from(document.querySelectorAll('.filter-cb[data-type="land"]:checked')).map(cb => parseInt(cb.value));
-    
-    ALL_MARKERS.forEach(function(item) {
-        var isVisible = checkedRocks.includes(item.rock) && checkedLands.includes(item.land);
-        if (isVisible) {
-            item.marker.setStyle({opacity: 0.9, fillOpacity: 0.85});
-            item.marker.bringToFront(); // Ensure visible points are clickable
-        } else {
-            item.marker.setStyle({opacity: 0, fillOpacity: 0});
-            item.marker.closePopup(); // close if it was open
-        }
-    });
+function applyFilters(){
+  var rocks=Array.from(document.querySelectorAll('.filter-cb[data-type="rock"]:checked')).map(function(cb){return parseInt(cb.value);});
+  var lands=Array.from(document.querySelectorAll('.filter-cb[data-type="land"]:checked')).map(function(cb){return parseInt(cb.value);});
+  ALL_MARKERS.forEach(function(item){
+    var vis=rocks.includes(item.rock)&&lands.includes(item.land);
+    item.marker.setStyle({opacity:vis?0.9:0,fillOpacity:vis?0.85:0});
+    if(!vis) item.marker.closePopup();
+  });
 }
-document.querySelectorAll('.filter-cb').forEach(cb => cb.addEventListener('change', applyFilters));
+document.querySelectorAll('.filter-cb').forEach(function(cb){cb.addEventListener('change',applyFilters);});
 
+document.getElementById('boundaryToggle').addEventListener('change',function(){
+  var show=this.checked;
+  ALL_POLYGONS.forEach(function(p){
+    p.setStyle({opacity:show?0.9:0,fillOpacity:show?0.05:0});
+  });
+});
 </script>
 <style>
-.map-tooltip {background:#1a1a3e; border:1px solid #4cc9f0; color:#e0e0ff; font-weight:600;}
-.map-tooltip.leaflet-tooltip-top:before {border-top-color:#4cc9f0;}
+.map-tooltip{background:#1a1a3e;border:1px solid #4cc9f0;color:#e0e0ff;font-weight:600}
+.map-tooltip.leaflet-tooltip-top:before{border-top-color:#4cc9f0}
+.boundary-tooltip{background:#1a1a3e;border:1px solid #ffd166;color:#ffd166;font-weight:600;font-size:.8rem}
+.boundary-tooltip.leaflet-tooltip-top:before{border-top-color:#ffd166}
 </style>
 </body>
 </html>
 """)
 
-out = os.path.join(BASE, "validation_maps.html")
+out = os.path.join(BASE, "index.html")
 with open(out, "w", encoding="utf-8") as f:
     f.write(TMPL.substitute(
         n_samples=n,
         rows_js=json.dumps(rows),
-        metals_js=json.dumps(METALS)
+        metals_js=json.dumps(METALS),
+        boundary_js=json.dumps(boundary_wgs84),
     ))
 
-print(f"Validation Maps Dashboard (Filtered) written -> {out}")
+print(f"Validation Maps written -> {out}  (hull pts: {len(hull_km)}, offset hull pts: {len(hull_off)})")
